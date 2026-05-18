@@ -515,6 +515,105 @@
     .ref-cell strong { font-size: 1rem; }
     .ref-cell .ref-morse { font-family: monospace; color: var(--muted); font-size: 0.75rem; }
 
+    /* ===================== SEQUENCE TAB ===================== */
+    .seq-locked {
+      text-align: center;
+      padding: 48px 20px;
+      color: var(--muted);
+    }
+
+    .seq-lock-icon {
+      font-size: 3rem;
+      margin-bottom: 12px;
+      opacity: 0.5;
+    }
+
+    .seq-stats {
+      font-size: 0.8rem;
+      color: var(--muted);
+      text-align: center;
+      margin-bottom: 16px;
+    }
+
+    .seq-prompt {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px 24px;
+      margin-bottom: 16px;
+      text-align: center;
+      min-height: 160px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      transition: border-color 0.2s;
+    }
+
+    .seq-prompt.correct { border-color: var(--green); }
+    .seq-prompt.wrong { border-color: var(--red); }
+
+    .seq-type-label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--accent2);
+      font-weight: 700;
+    }
+
+    .seq-morse-display {
+      font-size: 1.9rem;
+      font-family: monospace;
+      letter-spacing: 0.18em;
+      line-height: 1.6;
+    }
+
+    .seq-input-row {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .seq-input {
+      background: var(--bg);
+      border: 2px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 20px;
+      font-size: 1.4rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--text);
+      text-align: center;
+      width: 180px;
+      letter-spacing: 0.2em;
+      font-family: monospace;
+    }
+
+    .seq-input:focus { outline: none; border-color: var(--accent2); }
+    .seq-input:disabled { opacity: 0.7; cursor: not-allowed; }
+
+    .seq-feedback {
+      margin-top: 12px;
+      font-size: 0.9rem;
+      line-height: 1.7;
+      text-align: center;
+    }
+
+    .seq-letter-chip {
+      display: inline-block;
+      padding: 5px 12px;
+      border-radius: 8px;
+      margin: 3px;
+      font-weight: 800;
+      font-family: monospace;
+      font-size: 1.15rem;
+    }
+
+    .seq-letter-chip.correct { background: rgba(74,222,128,0.12); color: var(--green); border: 1px solid rgba(74,222,128,0.4); }
+    .seq-letter-chip.wrong   { background: rgba(248,113,113,0.12); color: var(--red);   border: 1px solid rgba(248,113,113,0.4); }
+
     footer {
       text-align: center;
       padding: 14px;
@@ -541,6 +640,7 @@
 
 <div class="tabs">
   <button class="tab-btn active" onclick="switchTab('learn')">Learn</button>
+  <button class="tab-btn" onclick="switchTab('sequence')">Sequence</button>
   <button class="tab-btn" onclick="switchTab('practice')">Practice</button>
   <button class="tab-btn" onclick="switchTab('chat')">Chat</button>
 </div>
@@ -621,6 +721,41 @@
       <input type="text" id="chat-input" placeholder="Say something…" onkeydown="if(event.key==='Enter')sendChat()" />
       <button onclick="sendChat()">Send</button>
     </div>
+  </div>
+
+  <!-- ===================== SEQUENCE TAB ===================== -->
+  <div class="tab-panel" id="tab-sequence">
+
+    <!-- Locked state (fewer than 5 letters unlocked) -->
+    <div class="seq-locked" id="seq-locked">
+      <div class="seq-lock-icon">&#128274;</div>
+      <div style="font-weight:700;margin-bottom:8px">Sequence mode</div>
+      <div id="seq-lock-msg" style="line-height:1.6"></div>
+    </div>
+
+    <!-- Active state -->
+    <div id="seq-active" style="display:none">
+      <div class="seq-stats" id="seq-stats">Sequences: 0 correct / 0 total</div>
+
+      <div class="seq-prompt" id="seq-prompt">
+        <div class="seq-type-label" id="seq-type-label">Read the sequence</div>
+        <div class="seq-morse-display" id="seq-morse-display"></div>
+        <div id="seq-audio-area"></div>
+      </div>
+
+      <div class="seq-input-row">
+        <input type="text" class="seq-input" id="seq-input"
+          maxlength="8" autocomplete="off" autocapitalize="characters"
+          placeholder="type letters"
+          oninput="this.value = this.value.toUpperCase().replace(/[^A-Z]/g,'')"
+          onkeydown="if(event.key==='Enter') checkSequence()" />
+        <button class="btn-submit" onclick="checkSequence()">Check</button>
+      </div>
+
+      <div class="seq-feedback" id="seq-feedback"></div>
+      <div class="card-controls" style="margin-top:16px" id="seq-controls"></div>
+    </div>
+
   </div>
 
 </main>
@@ -1180,6 +1315,154 @@ function resetProgress() {
 }
 
 // ================================================================
+// SEQUENCE TAB
+// ================================================================
+let seqCurrent = [];    // letters in current sequence
+let seqMode   = 0;     // 0 = see morse, 1 = hear morse
+let seqDone   = false;
+
+function seqIsUnlocked() { return state.unlocked >= 5; }
+
+function initSequenceTab() {
+  const lockedEl = document.getElementById('seq-locked');
+  const activeEl = document.getElementById('seq-active');
+
+  if (!seqIsUnlocked()) {
+    lockedEl.style.display = 'block';
+    activeEl.style.display  = 'none';
+    const needed = 5 - state.unlocked;
+    document.getElementById('seq-lock-msg').textContent =
+      `Unlock ${needed} more letter${needed !== 1 ? 's' : ''} in the Learn tab to access sequence testing. ` +
+      `Keep practising — it won't take long.`;
+    return;
+  }
+
+  lockedEl.style.display = 'none';
+  activeEl.style.display  = 'block';
+  updateSeqStats();
+  renderSequence();
+}
+
+function updateSeqStats() {
+  const c = state.seqCorrect || 0;
+  const t = state.seqTotal   || 0;
+  const pct = t > 0 ? ` (${Math.round(c / t * 100)}%)` : '';
+  document.getElementById('seq-stats').textContent =
+    `Sequences: ${c} correct / ${t} total${pct}`;
+}
+
+function renderSequence() {
+  seqDone = false;
+
+  const letters = activeLetters();
+  // Length grows as you unlock more: 3 for ≤7, 4 for ≤14, 5 for 15+
+  const len = letters.length <= 7 ? 3 : letters.length <= 14 ? 4 : 5;
+  seqCurrent = Array.from({length: len}, () =>
+    letters[Math.floor(Math.random() * letters.length)]
+  );
+  seqMode = Math.random() < 0.5 ? 0 : 1;
+
+  // Reset UI
+  const input = document.getElementById('seq-input');
+  input.value = '';
+  input.disabled = false;
+  document.getElementById('seq-feedback').innerHTML = '';
+  document.getElementById('seq-controls').innerHTML = '';
+  document.getElementById('seq-prompt').className = 'seq-prompt';
+  document.getElementById('seq-audio-area').innerHTML = '';
+
+  const morseDisplay = document.getElementById('seq-morse-display');
+
+  if (seqMode === 0) {
+    // Show morse symbols separated by a thin divider
+    document.getElementById('seq-type-label').textContent = 'What letters are these?';
+    morseDisplay.innerHTML = seqCurrent.map(l =>
+      MORSE[l].split('').map(c =>
+        c === '.' ? '<span class="d">&middot;</span>' : '<span class="h">&mdash;</span>'
+      ).join('')
+    ).join('<span style="color:#333;padding:0 8px">/</span>');
+    morseDisplay.style.display = 'block';
+  } else {
+    // Play audio — hide morse, show play button
+    document.getElementById('seq-type-label').textContent = 'Which letters did you hear?';
+    morseDisplay.style.display = 'none';
+
+    const btn = document.createElement('button');
+    btn.className = 'audio-btn';
+    btn.style.margin = '4px auto';
+    btn.innerHTML = '&#9654; Play sequence';
+    btn.onclick = () => playSequenceAudio(seqCurrent);
+    document.getElementById('seq-audio-area').appendChild(btn);
+
+    setTimeout(() => playSequenceAudio(seqCurrent), 300);
+  }
+
+  setTimeout(() => input.focus(), 50);
+}
+
+async function playSequenceAudio(letters) {
+  const ctx = getAudioCtx();
+  let t = ctx.currentTime + 0.05;
+  for (let li = 0; li < letters.length; li++) {
+    const code = MORSE[letters[li]];
+    for (const sym of code) {
+      if (sym === '.') { beep(ctx, t, DOT_DUR);  t += DOT_DUR  + GAP; }
+      else             { beep(ctx, t, DASH_DUR); t += DASH_DUR + GAP; }
+    }
+    if (li < letters.length - 1) t += LETTER_GAP * 2.5;
+  }
+}
+
+function checkSequence() {
+  if (seqDone) return;
+  const input  = document.getElementById('seq-input');
+  const answer = input.value.toUpperCase().replace(/[^A-Z]/g, '');
+  if (!answer) { input.focus(); return; }
+
+  seqDone = true;
+  input.disabled = true;
+
+  const correct = seqCurrent.join('');
+  const allRight = answer === correct;
+
+  document.getElementById('seq-prompt').classList.add(allRight ? 'correct' : 'wrong');
+
+  // Per-letter result chips
+  let html = '<div style="margin-bottom:10px">';
+  for (let i = 0; i < seqCurrent.length; i++) {
+    const expected  = seqCurrent[i];
+    const got       = (answer[i] || '').toUpperCase();
+    const match     = got === expected;
+    const morse     = MORSE[expected];
+    html += `<span class="seq-letter-chip ${match ? 'correct' : 'wrong'}" title="${morse}">${expected}</span>`;
+  }
+  html += '</div>';
+
+  if (!allRight) {
+    html += `<div style="color:var(--muted);font-size:0.82rem">`;
+    if (answer.length !== correct.length) {
+      html += `You typed ${answer.length} letter${answer.length !== 1 ? 's' : ''}, ` +
+              `sequence had ${correct.length}. `;
+    }
+    html += `Your answer: <strong style="font-family:monospace;letter-spacing:0.12em">${answer || '—'}</strong></div>`;
+  }
+
+  document.getElementById('seq-feedback').innerHTML = html;
+
+  // Update stats
+  state.seqCorrect = (state.seqCorrect || 0) + (allRight ? 1 : 0);
+  state.seqTotal   = (state.seqTotal   || 0) + 1;
+  saveState(state);
+  updateSeqStats();
+
+  const nextBtn = document.createElement('button');
+  nextBtn.className = 'btn-next';
+  nextBtn.textContent = 'Next sequence →';
+  nextBtn.onclick = renderSequence;
+  document.getElementById('seq-controls').appendChild(nextBtn);
+}
+
+// ================================================================
 // TABS
 // ================================================================
 function switchTab(name) {
@@ -1189,6 +1472,7 @@ function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach(b => {
     if (b.textContent.toLowerCase() === name) b.classList.add('active');
   });
+  if (name === 'sequence') initSequenceTab();
 }
 
 // ================================================================
