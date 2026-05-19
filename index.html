@@ -1139,11 +1139,18 @@ function recordResult(letter, isCorrect) {
 
 function checkUnlock() {
   if (state.unlocked >= UNLOCK_ORDER.length) return;
-  // Unlock when 80% of current active letters are mastered
   const active = activeLetters();
+  // Wait until every active letter has been attempted at least once before
+  // considering a new batch — prevents letters just added from immediately
+  // triggering the next unlock.
+  const anyUnseen = active.some(l => (state.correct[l] || 0) + (state.incorrect[l] || 0) === 0);
+  if (anyUnseen) return;
   const masteredCount = active.filter(isMastered).length;
-  if (masteredCount >= Math.ceil(active.length * 0.6) && state.unlocked < UNLOCK_ORDER.length) {
-    state.unlocked = Math.min(state.unlocked + 1, UNLOCK_ORDER.length);
+  // Unlock the next 2-3 letters as a batch once 80% of the current set is mastered.
+  // Batching means fewer, more intentional progression steps.
+  if (masteredCount >= Math.ceil(active.length * 0.8)) {
+    const BATCH = 3;
+    state.unlocked = Math.min(state.unlocked + BATCH, UNLOCK_ORDER.length);
     saveState(state);
   }
 }
